@@ -44,6 +44,7 @@ type natsJetStreamMetadata struct {
 	activationLagThreshold int64
 	clusterSize            int
 	scalerIndex            int
+	nodeURLs               map[string]string
 }
 
 type jetStreamEndpointResponse struct {
@@ -57,6 +58,7 @@ type jetStreamServerEndpointResponse struct {
 }
 
 type jetStreamCluster struct {
+	Address  string   `json:"addr"`
 	HostUrls []string `json:"urls"`
 }
 
@@ -215,8 +217,9 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 
 	if s.metadata.clusterSize > 1 {
 		// we know who the consumer leader is, query it directly
-		if s.metadata.consumerLeader != "" {
-			natsJetStreamMonitoringLeaderURL, err := s.getNATSJetStreamMonitoringNodeURL(s.metadata.consumerLeader)
+		natsJetStreamMonitoringLeaderHost := s.metadata.nodeURLs[s.metadata.consumerLeader]
+		if natsJetStreamMonitoringLeaderHost != "" {
+			natsJetStreamMonitoringLeaderURL, err := s.getNATSJetStreamMonitoringNodeURL(natsJetStreamMonitoringLeaderHost)
 			if err != nil {
 				return err
 			}
@@ -231,7 +234,7 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 		}
 
 		// we haven't found the consumer yet, grab the list of hosts and try each one
-		natsJetStreamMonitoringServerURL, err := s.getNATSJetStreamMonitoringServerURL()
+		natsJetStreamMonitoringServerURL, err := s.getNATSJetStreamMonitoringServerURL("")
 		if err != nil {
 			return err
 		}
@@ -241,9 +244,26 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 			return err
 		}
 
+		s.metadata.nodeURLs[jetStreamServerResp.ServerName] = jetStreamServerResp.Cluster.Address
+
 		for _, clusterURL := range jetStreamServerResp.Cluster.HostUrls {
-			node := strings.Split(clusterURL, ".")[0]
-			natsJetStreamMonitoringNodeURL, err := s.getNATSJetStreamMonitoringNodeURL(node)
+			nodeHostname := strings.Split(clusterURL, ":")[0]
+			natsJetStreamMonitoringServerURL, err := s.getNATSJetStreamMonitoringServerURL(nodeHostname)
+			if err != nil {
+				return err
+			}
+
+			// Query server info to get its name
+			jetStreamServerResp, err := s.getNATSJetstreamServerInfo(ctx, natsJetStreamMonitoringServerURL)
+			if err != nil {
+				return err
+			}
+
+			node := jetStreamServerResp.ServerName
+
+			s.metadata.nodeURLs[node] = jetStreamServerResp.Cluster.Address
+
+			natsJetStreamMonitoringNodeURL, err := s.getNATSJetStreamMonitoringNodeURL(nodeHostname)
 			if err != nil {
 				return err
 			}
@@ -291,7 +311,9 @@ func (s *natsJetStreamScaler) setNATSJetStreamMonitoringData(jetStreamAccountRes
 							if leaderURL != "" {
 								s.metadata.monitoringLeaderURL = leaderURL
 							}
-							return true
+							_, ok := s.metadata.nodeURLs[consumer.Cluster.Leader]
+							// if node address not found, return false to populate the addresses
+							return ok
 						}
 					}
 				}
@@ -305,6 +327,7 @@ func (s *natsJetStreamScaler) invalidateNATSJetStreamCachedMonitoringData() {
 	s.metadata.consumerLeader = ""
 	s.metadata.monitoringLeaderURL = ""
 	s.stream = nil
+	s.metadata.nodeURLs = make(map[string]string)
 }
 
 func (s *natsJetStreamScaler) getNATSJetstreamServerInfo(ctx context.Context, natsJetStreamMonitoringServerURL string) (*jetStreamServerEndpointResponse, error) {
@@ -358,22 +381,37 @@ func getNATSJetStreamMonitoringURL(useHTTPS bool, natsServerEndpoint string, acc
 	return fmt.Sprintf("%s://%s/jsz?acc=%s&consumers=true&config=true", scheme, natsServerEndpoint, account)
 }
 
-func (s *natsJetStreamScaler) getNATSJetStreamMonitoringServerURL() (string, error) {
+func (s *natsJetStreamScaler) getNATSJetStreamMonitoringServerURL(nodeHostname string) (string, error) {
 	jsURL, err := url.Parse(s.metadata.monitoringURL)
 	if err != nil {
 		s.logger.Error(err, "unable to parse monitoring URL to create server URL", "natsServerMonitoringURL", s.metadata.monitoringURL)
 		return "", err
 	}
-	return fmt.Sprintf("%s://%s/varz", jsURL.Scheme, jsURL.Host), nil
+
+	hostname := jsURL.Hostname()
+	if nodeHostname != "" {
+		hostname = nodeHostname
+	}
+
+	if jsURL.Port() != "" {
+		hostname = fmt.Sprintf("%s:%s", hostname, jsURL.Port())
+	}
+
+	return fmt.Sprintf("%s://%s/varz", jsURL.Scheme, hostname), nil
 }
 
-func (s *natsJetStreamScaler) getNATSJetStreamMonitoringNodeURL(node string) (string, error) {
+func (s *natsJetStreamScaler) getNATSJetStreamMonitoringNodeURL(nodeHostname string) (string, error) {
 	jsURL, err := url.Parse(s.metadata.monitoringURL)
 	if err != nil {
 		s.logger.Error(err, "unable to parse monitoring URL to create node URL", "natsServerMonitoringURL", s.metadata.monitoringURL)
 		return "", err
 	}
-	return fmt.Sprintf("%s://%s.%s%s?%s", jsURL.Scheme, node, jsURL.Host, jsURL.Path, jsURL.RawQuery), nil
+
+	if jsURL.Port() != "" {
+		nodeHostname = fmt.Sprintf("%s:%s", nodeHostname, jsURL.Port())
+	}
+
+	return fmt.Sprintf("%s://%s%s?%s", jsURL.Scheme, nodeHostname, jsURL.Path, jsURL.RawQuery), nil
 }
 
 func (s *natsJetStreamScaler) getMaxMsgLag() int64 {
