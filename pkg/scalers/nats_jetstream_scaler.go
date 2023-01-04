@@ -236,21 +236,8 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 			return err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, natsJetStreamMonitoringServerURL, nil)
+		jetStreamServerResp, err := s.getNATSJetstreamServerInfo(ctx, natsJetStreamMonitoringServerURL)
 		if err != nil {
-			return err
-		}
-
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			s.logger.Error(err, "unable to access NATS JetStream monitoring server endpoint", "natsServerMonitoringURL", natsJetStreamMonitoringServerURL)
-			return err
-		}
-
-		defer resp.Body.Close()
-		var jetStreamServerResp *jetStreamServerEndpointResponse
-		if err = json.NewDecoder(resp.Body).Decode(&jetStreamServerResp); err != nil {
-			s.logger.Error(err, "unable to decode NATS JetStream server details")
 			return err
 		}
 
@@ -318,6 +305,28 @@ func (s *natsJetStreamScaler) invalidateNATSJetStreamCachedMonitoringData() {
 	s.metadata.consumerLeader = ""
 	s.metadata.monitoringLeaderURL = ""
 	s.stream = nil
+}
+
+func (s *natsJetStreamScaler) getNATSJetstreamServerInfo(ctx context.Context, natsJetStreamMonitoringServerURL string) (*jetStreamServerEndpointResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, natsJetStreamMonitoringServerURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		s.logger.Error(err, "unable to access NATS JetStream monitoring server endpoint", "natsServerMonitoringURL", natsJetStreamMonitoringServerURL)
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	var jetStreamServerResp *jetStreamServerEndpointResponse
+	if err = json.NewDecoder(resp.Body).Decode(&jetStreamServerResp); err != nil {
+		s.logger.Error(err, "unable to decode NATS JetStream server details")
+		return nil, err
+	}
+
+	return jetStreamServerResp, nil
 }
 
 func (s *natsJetStreamScaler) getNATSJetstreamMonitoringRequest(ctx context.Context, natsJetStreamMonitoringURL string) (*jetStreamEndpointResponse, error) {
