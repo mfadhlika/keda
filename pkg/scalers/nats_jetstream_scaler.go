@@ -251,6 +251,9 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 				return err
 			}
 
+			// nats-1.nats.svc.cluster.local:4221 -> nats-1.nats.svc.cluster.local
+			// or
+			// 172.0.1.3:4221 -> 172.0.1.3
 			nodeHostname := nodeURL.Hostname()
 			natsJetStreamMonitoringServerURL, err := s.getNATSJetStreamMonitoringServerURL(nodeHostname)
 			if err != nil {
