@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/go-logr/logr"
 	v2 "k8s.io/api/autoscaling/v2"
@@ -247,7 +246,12 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 		s.metadata.nodeURLs[jetStreamServerResp.ServerName] = jetStreamServerResp.Cluster.Address
 
 		for _, clusterURL := range jetStreamServerResp.Cluster.HostUrls {
-			nodeHostname := strings.Split(clusterURL, ":")[0]
+			nodeURL, err := url.Parse(clusterURL)
+			if err != nil {
+				return err
+			}
+
+			nodeHostname := nodeURL.Hostname()
 			natsJetStreamMonitoringServerURL, err := s.getNATSJetStreamMonitoringServerURL(nodeHostname)
 			if err != nil {
 				return err

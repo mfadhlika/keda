@@ -431,7 +431,7 @@ func TestNATSJetStreamGetNATSJetstreamServerURL(t *testing.T) {
 
 	mockJetStreamScaler.metadata.monitoringURL = "234234:::::34234234;;;;really_bad_URL;;/"
 
-	_, err = mockJetStreamScaler.getNATSJetStreamMonitoringServerURL()
+	_, err = mockJetStreamScaler.getNATSJetStreamMonitoringServerURL("")
 	if err == nil {
 		t.Error("Expected error for parsing monitoring server URL but got success")
 	}
