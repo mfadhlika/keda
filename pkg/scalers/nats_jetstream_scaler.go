@@ -52,13 +52,8 @@ type jetStreamEndpointResponse struct {
 }
 
 type jetStreamServerEndpointResponse struct {
-	Cluster    jetStreamCluster `json:"cluster"`
-	ServerName string           `json:"server_name"`
-}
-
-type jetStreamCluster struct {
-	Address  string   `json:"addr"`
-	HostUrls []string `json:"urls"`
+	HostUrls   []string `json:"connect_urls"`
+	ServerName string   `json:"server_name"`
 }
 
 type accountDetail struct {
@@ -243,14 +238,14 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 			return err
 		}
 
-		s.metadata.nodeURLs[jetStreamServerResp.ServerName] = jetStreamServerResp.Cluster.Address
-
-		for _, clusterURL := range jetStreamServerResp.Cluster.HostUrls {
+		for _, clusterURL := range jetStreamServerResp.HostUrls {
 			nodeURL, err := url.Parse(clusterURL)
 			if err != nil {
+				s.logger.Error(err, "Unable to parse cluserUrl %s", clusterURL)
 				return err
 			}
 
+			// get hostname from the url
 			// nats-1.nats.svc.cluster.local:4221 -> nats-1.nats.svc.cluster.local
 			// or
 			// 172.0.1.3:4221 -> 172.0.1.3
@@ -268,8 +263,11 @@ func (s *natsJetStreamScaler) getNATSJetstreamMonitoringData(ctx context.Context
 
 			node := jetStreamServerResp.ServerName
 
-			s.metadata.nodeURLs[node] = jetStreamServerResp.Cluster.Address
+			s.metadata.nodeURLs[node] = nodeHostname
 
+		}
+
+		for node, nodeHostname := range s.metadata.nodeURLs {
 			natsJetStreamMonitoringNodeURL, err := s.getNATSJetStreamMonitoringNodeURL(nodeHostname)
 			if err != nil {
 				return err
